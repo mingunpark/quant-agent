@@ -1,0 +1,15 @@
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=12.0.0
+OpenDartReader>=0.2.0
+pykrx>=1.0.45
+FinanceDataReader>=0.9.50
+pandas-ta>=0.3.14b0
+vectorbt>=0.25.0
+quantstats>=0.0.62
+python-dotenv>=1.0.0
+streamlit>=1.35.0
+openpyxl>=3.1.0
+plotly>=5.22.0
+requests>=2.31.0
+pytest>=7.4.0

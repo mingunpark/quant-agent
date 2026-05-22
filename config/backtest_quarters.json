@@ -1,0 +1,8 @@
+{
+  "backtest_start": {"year": 2023, "quarter": 1},
+  "backtest_end":   {"year": 2025, "quarter": 4},
+  "yoy_lookback_quarters": 4,
+  "output_dir": "scorer/output",
+  "scorer_top_n": 10,
+  "_note": "TOP_N=10은 scorer/score.py 현재값. CLAUDE.md 스펙(상위 20)과 다름 — 백테스트 통과 후 20 변경 여부 판단"
+}
