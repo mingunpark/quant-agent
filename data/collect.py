@@ -176,12 +176,26 @@ def _extract_account(fs: pd.DataFrame, account_name: str) -> float:
 
 
 def _extract_rcept_dt(fs: pd.DataFrame) -> date | None:
-    if "rcept_dt" not in fs.columns or fs.empty:
+    """접수일 추출. rcept_dt → rcept_no 앞 8자리(YYYYMMDD) 순으로 시도."""
+    if fs.empty:
         return None
-    raw = str(fs.iloc[0]["rcept_dt"])
-    if len(raw) != 8 or not raw.isdigit():
-        return None
-    return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
+    # 우선순위 1: rcept_dt 컬럼
+    if "rcept_dt" in fs.columns:
+        raw = str(fs.iloc[0]["rcept_dt"])
+        if len(raw) == 8 and raw.isdigit():
+            try:
+                return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
+            except ValueError:
+                pass
+    # 우선순위 2: rcept_no 앞 8자리 (DART API 실제 응답 형식: 20250515001922)
+    if "rcept_no" in fs.columns:
+        raw = str(fs.iloc[0]["rcept_no"])
+        if len(raw) >= 8 and raw[:8].isdigit():
+            try:
+                return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
+            except ValueError:
+                pass
+    return None
 
 
 def collect_price(ticker: str, start: date, end: date) -> Path:

@@ -368,10 +368,39 @@ with tab_collect:
                         _make_cb(total_tickers, f"{collect_year - 1}Q{collect_quarter}"),
                     )
 
-                    # 컨센서스 및 팩터 생성
-                    progress_bar.progress(0.95)
-                    status_text.text("컨센서스 및 팩터 입력 생성 중 (종목명 조회 포함)...")
+                    # 컨센서스 수집
+                    progress_bar.progress(0.75)
+                    status_text.text("컨센서스 데이터 수집 중...")
                     _collect_consensus(collect_year, collect_quarter, all_tickers)
+
+                    # 가격/밸류에이션 수집 (PBR, PER, market_cap, EPS 확보)
+                    from data.collect import collect_price as _collect_price
+                    from datetime import date as _date
+                    _price_start = _date(collect_year - 1, 1, 1)
+                    _price_end = _date(collect_year, 12, 31)
+                    _price_fails: list[str] = []
+                    for _pi, _pt in enumerate(all_tickers):
+                        prog = 0.75 + 0.20 * (_pi + 1) / max(total_tickers, 1)
+                        progress_bar.progress(min(prog, 0.95))
+                        if _pi % 10 == 0:
+                            status_text.text(
+                                f"가격/밸류에이션 수집 중... ({_pi + 1}/{total_tickers}) "
+                                "— PBR·PER·시가총액 확보"
+                            )
+                        try:
+                            _collect_price(_pt, _price_start, _price_end)
+                        except Exception:
+                            _price_fails.append(_pt)
+                    if _price_fails:
+                        st.warning(
+                            f"가격 수집 실패 {len(_price_fails)}종목 "
+                            f"(PBR/PER/시가총액 비어있을 수 있음): "
+                            f"{', '.join(_price_fails[:5])}{'...' if len(_price_fails) > 5 else ''}"
+                        )
+
+                    # 팩터 입력 생성
+                    progress_bar.progress(0.97)
+                    status_text.text("팩터 입력 생성 중 (종목명 조회 포함)...")
                     factor_path = build_factor_input(collect_year, collect_quarter, all_tickers)
 
                     progress_bar.progress(1.0)
