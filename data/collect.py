@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
+import requests
 from dotenv import load_dotenv
 
 
@@ -247,6 +248,110 @@ def collect_ticker_names(tickers: list[str]) -> dict[str, str]:
         except Exception:
             result[ticker] = ""
     return result
+
+
+# DART 실제 report_nm 형식: "분기보고서 (2025.03)", "반기보고서 (2025.06)" 등
+# "1분기보고서" / "3분기보고서" 키워드는 DART에 없음 → "분기보고서" 사용 후 회계월로 구분
+_QUARTER_REPORT_KEYWORDS = {
+    1: "분기보고서",
+    2: "반기보고서",
+    3: "분기보고서",
+    4: "사업보고서",
+}
+
+# 분기 말월 (12월 결산 기준, KOSPI200/KOSDAQ150 대다수): DART report_nm의 "(YYYY.MM)" 부분
+_QUARTER_FISCAL_MONTHS = {1: "03", 2: "06", 3: "09", 4: "12"}
+
+# 분기 보고서 제출 기간 (bgn_de, end_de): DART 관행 기준
+_QUARTER_DATE_RANGES = {
+    1: ("{year}0501", "{year}0630"),   # Q1: 5~6월
+    2: ("{year}0801", "{year}0930"),   # Q2(반기): 8~9월
+    3: ("{year}1101", "{year}1231"),   # Q3: 11~12월
+    4: ("{nyear}0301", "{nyear}0430"), # Q4(사업보고서): 익년 3~4월
+}
+
+
+def collect_announce_dates(year: int, quarter: int) -> Path:
+    """DART 공시목록 API(/list.json)로 분기 보고서 접수일 일괄 조회.
+
+    날짜 범위 + 보고서명 필터링으로 전체 상장사 접수일 수집.
+    개별 finstate 호출 없이 몇 페이지만으로 완료.
+    반환: data/raw/dart/announce_dates_{year}Q{quarter}.parquet (ticker, announce_date)
+    """
+    out_path = RAW_DIR / "dart" / f"announce_dates_{year}Q{quarter}.parquet"
+    if out_path.exists():
+        return out_path
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    load_dotenv()
+    api_key = os.getenv("DART_API_KEY")
+    if not api_key:
+        raise EnvironmentError("DART_API_KEY 없음")
+
+    keyword = _QUARTER_REPORT_KEYWORDS[quarter]
+    fiscal_suffix = f"({year}.{_QUARTER_FISCAL_MONTHS[quarter]})"
+    bgn_tmpl, end_tmpl = _QUARTER_DATE_RANGES[quarter]
+    nyear = year + 1
+    bgn_de = bgn_tmpl.format(year=year, nyear=nyear)
+    end_de = end_tmpl.format(year=year, nyear=nyear)
+
+    date_map: dict[str, date] = {}
+    page = 1
+    while True:
+        try:
+            resp = requests.get(
+                "https://opendart.fss.or.kr/api/list.json",
+                params={
+                    "crtfc_key": api_key,
+                    "bgn_de": bgn_de,
+                    "end_de": end_de,
+                    "pblntf_ty": "A",  # 정기공시만 조회
+                    "page_count": 100,
+                    "page_no": page,
+                },
+                timeout=15,
+            )
+            data = resp.json()
+        except Exception as exc:
+            print(f"[ANNOUNCE] DART list API 실패 (p={page}): {exc}")
+            break
+
+        if data.get("status") != "000":
+            break
+
+        for item in data.get("list", []):
+            report_nm = item.get("report_nm", "").strip()
+            # DART 실제 형식: "분기보고서 (2025.03)", "[기재정정]분기보고서 (2025.03)" 등
+            if keyword not in report_nm:
+                continue
+            # Q1/Q3 구분 및 비12월 결산 제외: "(YYYY.MM)" 회계월 확인
+            if fiscal_suffix not in report_nm:
+                continue
+            stock_code = str(item.get("stock_code", "")).strip().zfill(6)
+            rcept_dt = str(item.get("rcept_dt", ""))
+            if not stock_code or stock_code == "000000":
+                continue
+            if len(rcept_dt) == 8 and rcept_dt.isdigit():
+                try:
+                    # 이미 등록된 종목은 최초(가장 이른) 접수일 우선
+                    new_date = date(int(rcept_dt[:4]), int(rcept_dt[4:6]), int(rcept_dt[6:8]))
+                    if stock_code not in date_map or new_date < date_map[stock_code]:
+                        date_map[stock_code] = new_date
+                except ValueError:
+                    pass
+
+        total_page = int(data.get("total_page", 1))
+        if page >= total_page:
+            break
+        page += 1
+        time.sleep(0.2)
+
+    rows = [{"ticker": k, "announce_date": v} for k, v in date_map.items()]
+    if not rows:
+        rows = [{"ticker": "__empty__", "announce_date": None}]  # 빈 parquet 방지
+    pd.DataFrame(rows).to_parquet(out_path, index=False)
+    print(f"[ANNOUNCE] {year}Q{quarter}: {len(date_map)}개 접수일 수집 완료")
+    return out_path
 
 
 def collect_consensus(year: int, quarter: int, tickers: list[str]) -> Path:
