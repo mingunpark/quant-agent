@@ -199,9 +199,44 @@ def _extract_rcept_dt(fs: pd.DataFrame) -> date | None:
     return None
 
 
-def collect_price(ticker: str, start: date, end: date) -> Path:
-    """pykrx로 한 종목의 일 단위 OHLCV + 시총 + 밸류에이션 수집.
+def _fetch_naver_pbr_per(ticker: str, session: requests.Session) -> dict[str, float]:
+    """네이버 금융 API에서 현재 시점의 PER/PBR/EPS 조회.
 
+    pykrx get_market_fundamental_by_date가 KRX 서버 이슈로 빈 결과를 반환하는 경우
+    대체 소스로 사용. 현재 시점 값만 반환 (역사적 시계열 불가).
+    """
+    _NAVER_API = "https://m.stock.naver.com/api/stock/{ticker}/integration"
+    _HEADERS = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)"}
+    try:
+        resp = session.get(_NAVER_API.format(ticker=ticker), timeout=6, headers=_HEADERS)
+        resp.raise_for_status()
+        info_map = {
+            item["code"]: item.get("value", "")
+            for item in resp.json().get("totalInfos", [])
+            if isinstance(item, dict) and "code" in item
+        }
+
+        def _parse(v: str) -> float:
+            cleaned = str(v).replace(",", "").replace("배", "").replace("원", "").strip()
+            try:
+                return float(cleaned)
+            except (TypeError, ValueError):
+                return float("nan")
+
+        return {
+            "PER": _parse(info_map.get("per", "")),
+            "PBR": _parse(info_map.get("pbr", "")),
+            "EPS": _parse(info_map.get("eps", "")),
+        }
+    except Exception:
+        return {"PER": float("nan"), "PBR": float("nan"), "EPS": float("nan")}
+
+
+def collect_price(ticker: str, start: date, end: date) -> Path:
+    """pykrx로 한 종목의 일 단위 OHLCV + 시총 수집. PER/PBR/EPS는 Naver API 폴백 포함.
+
+    pykrx get_market_fundamental_by_date가 KRX 서버 이슈로 빈 결과를 반환하는 경우
+    Naver API 현재값을 마지막 행에 주입한다. 이 경우 시계열 PER/PBR은 사용 불가.
     파일별 분리 저장 → 실패 시 해당 파일만 삭제 후 재실행 가능.
     """
     out_path = RAW_DIR / "price" / f"price_{ticker}_{start.year}_{end.year}.parquet"
@@ -216,6 +251,7 @@ def collect_price(ticker: str, start: date, end: date) -> Path:
     ohlcv = stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
     if ohlcv.empty:
         raise RuntimeError(f"{ticker}: pykrx OHLCV 수집 실패 (빈 결과)")
+
     fundamental = stock.get_market_fundamental_by_date(start_str, end_str, ticker)
     cap = stock.get_market_cap_by_date(start_str, end_str, ticker)
 
@@ -231,6 +267,20 @@ def collect_price(ticker: str, start: date, end: date) -> Path:
             "시가총액": "market_cap",
         }
     )
+
+    # pykrx fundamental 빈 결과 → Naver API로 현재 PER/PBR/EPS 보완
+    needs_naver = all(c not in df.columns for c in ("PER", "PBR", "EPS")) or (
+        df[["PER", "PBR", "EPS"]].isna().all(axis=None)
+        if all(c in df.columns for c in ("PER", "PBR", "EPS")) else True
+    )
+    if needs_naver:
+        with requests.Session() as _sess:
+            naver_vals = _fetch_naver_pbr_per(ticker, _sess)
+        for col, val in naver_vals.items():
+            df[col] = float("nan")
+            if not df.empty:
+                df.loc[df.index[-1], col] = val  # 마지막 행에만 주입
+
     df["ticker"] = ticker
     df.to_parquet(out_path)
     return out_path

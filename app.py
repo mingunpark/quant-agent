@@ -318,8 +318,11 @@ with tab_collect:
         else:
             if st.button("DART 수집 시작", type="primary", key="btn_collect"):
                 from data.universe import _index_paths
-                from data.collect import collect_dart_quarter as _collect_dart
-                from data.collect import collect_consensus as _collect_consensus
+                from data.collect import (
+                    collect_dart_quarter as _collect_dart,
+                    collect_consensus as _collect_consensus,
+                    collect_announce_dates as _collect_announce,
+                )
                 from data.process import build_factor_input
 
                 label_to_index = {v: k for k, v in INDEX_LABELS.items()}
@@ -368,6 +371,15 @@ with tab_collect:
                         _make_cb(total_tickers, f"{collect_year - 1}Q{collect_quarter}"),
                     )
 
+                    # 접수일(announce_date) 일괄 조회 — /list.json 2~3회 호출로 전체 수집
+                    progress_bar.progress(0.65)
+                    status_text.text("실적 발표일(announce_date) 수집 중...")
+                    try:
+                        _collect_announce(collect_year, collect_quarter)
+                        _collect_announce(collect_year - 1, collect_quarter)
+                    except Exception as _ann_e:
+                        st.warning(f"발표일 수집 실패 (announce_date 비어있을 수 있음): {_ann_e}")
+
                     # 컨센서스 수집
                     progress_bar.progress(0.75)
                     status_text.text("컨센서스 데이터 수집 중...")
@@ -389,8 +401,8 @@ with tab_collect:
                             )
                         try:
                             _collect_price(_pt, _price_start, _price_end)
-                        except Exception:
-                            _price_fails.append(_pt)
+                        except Exception as _pe:
+                            _price_fails.append(f"{_pt}({_pe})")
                     if _price_fails:
                         st.warning(
                             f"가격 수집 실패 {len(_price_fails)}종목 "
@@ -500,15 +512,24 @@ with tab_collect:
 
                 if "naver_validation" in st.session_state:
                     _nv_df: pd.DataFrame = st.session_state["naver_validation"]
+                    has_price_missing = (_nv_df["경고"] == "가격 미수집").any()
                     has_warning = (_nv_df["경고"] == "주의").any()
+                    if has_price_missing:
+                        st.info(
+                            "가격 데이터(PER/PBR)가 아직 수집되지 않아 Naver 현재값을 참조합니다. "
+                            "0단계에서 가격 수집을 완료하면 정확한 교차 검증이 가능합니다."
+                        )
                     if has_warning:
                         st.warning("15% 이상 차이가 발생한 종목이 있습니다. 데이터를 직접 확인하세요.")
-                    else:
+                    elif not has_price_missing:
                         st.success("모든 샘플 종목이 정상 범위 내에 있습니다.")
 
                     def _style_warning(row):
-                        color = "background-color: #fff3cd" if row["경고"] == "주의" else ""
-                        return [color] * len(row)
+                        if row["경고"] == "주의":
+                            return ["background-color: #fff3cd"] * len(row)
+                        if row["경고"] == "가격 미수집":
+                            return ["background-color: #f0f0f0"] * len(row)
+                        return [""] * len(row)
 
                     st.dataframe(
                         _nv_df.style.apply(_style_warning, axis=1),
