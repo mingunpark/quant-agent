@@ -1,6 +1,8 @@
-"""네이버 금융 모바일 API를 통한 DART 데이터 교차 검증.
+"""pykrx / DART 데이터와 네이버 금융의 교차 검증.
 
-PER/EPS/PBR 값을 네이버 금융과 비교하여 15% 초과 차이 발생 시 경고 플래그 설정.
+PBR: pykrx(KRX BPS 기준) vs 네이버 — 15% 초과 차이 시 경고.
+PER: 참고 표시만. pykrx TTM EPS vs 네이버 FY Annual EPS 방법론이 달라
+     분기 실적 편차가 큰 종목은 50% 이상 차이가 날 수 있음 (데이터 오류 아님).
 HTML 파싱 없이 JSON API를 사용하므로 구조 변화에 강건함.
 """
 
@@ -16,7 +18,8 @@ import requests
 
 _NAVER_API = "https://m.stock.naver.com/api/stock/{ticker}/integration"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15"}
-DIFF_THRESHOLD = 0.15
+PBR_DIFF_THRESHOLD = 0.15   # PBR 15% 초과 시 경고 (같은 BPS 기준 비교 가능)
+PER_DIFF_THRESHOLD = 0.50   # PER 참고용: TTM vs Annual EPS 방법론 차이로 50%+ 차이 가능
 _DELAY = 0.5  # 네이버 서버 부하 방지 (초당 2건 이하)
 
 
@@ -132,20 +135,24 @@ def validate_against_naver(
 
             diff_per = _pct_diff(d_per, n_per)
             diff_pbr = _pct_diff(d_pbr, n_pbr)
-            warn = (
-                (not math.isnan(diff_per) and diff_per > DIFF_THRESHOLD)
-                or (not math.isnan(diff_pbr) and diff_pbr > DIFF_THRESHOLD)
+            # 경고는 PBR만 기준: PER은 TTM vs Annual EPS 방법론 차이로 항상 크게 벌어짐
+            pbr_warn = not math.isnan(diff_pbr) and diff_pbr > PBR_DIFF_THRESHOLD
+            per_note = (
+                "N/A" if math.isnan(d_per)
+                else f"{_fmt_pct(diff_per)} ※TTM/Annual차이"
+                if not math.isnan(diff_per) and diff_per > PER_DIFF_THRESHOLD
+                else _fmt_pct(diff_per)
             )
 
             rows.append({
                 "종목코드": ticker,
                 "pykrx_PER": "미수집" if math.isnan(d_per) else _fmt(d_per),
                 "Naver_PER": _fmt(n_per),
-                "PER_차이": "N/A" if math.isnan(d_per) else _fmt_pct(diff_per),
+                "PER_차이": "N/A" if price_missing else per_note,
                 "pykrx_PBR": "미수집" if math.isnan(d_pbr) else _fmt(d_pbr),
                 "Naver_PBR": _fmt(n_pbr),
                 "PBR_차이": "N/A" if math.isnan(d_pbr) else _fmt_pct(diff_pbr),
-                "경고": "미수집" if price_missing else ("주의" if warn else "정상"),
+                "경고": "미수집" if price_missing else ("PBR주의" if pbr_warn else "정상"),
             })
 
     if progress_callback:

@@ -255,6 +255,9 @@ def collect_price(ticker: str, start: date, end: date) -> Path:
     fundamental = stock.get_market_fundamental_by_date(start_str, end_str, ticker)
     cap = stock.get_market_cap_by_date(start_str, end_str, ticker)
 
+    # 시가총액: pykrx는 원(KRW) 단위 반환 → 백만원으로 변환 (data/CLAUDE.md 규격)
+    cap["시가총액"] = cap["시가총액"] / 1_000_000
+
     df = ohlcv.join(fundamental, how="left").join(cap[["시가총액"]], how="left")
     df.index.name = "date"
     df = df.rename(
@@ -264,7 +267,7 @@ def collect_price(ticker: str, start: date, end: date) -> Path:
             "저가": "low",
             "종가": "close",
             "거래량": "volume",
-            "시가총액": "market_cap",
+            "시가총액": "market_cap",  # 백만원 단위
         }
     )
 

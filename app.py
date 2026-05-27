@@ -513,19 +513,23 @@ with tab_collect:
                 if "naver_validation" in st.session_state:
                     _nv_df: pd.DataFrame = st.session_state["naver_validation"]
                     has_price_missing = (_nv_df["경고"] == "미수집").any()
-                    has_warning = (_nv_df["경고"] == "주의").any()
+                    has_pbr_warning = (_nv_df["경고"] == "PBR주의").any()
                     if has_price_missing:
                         st.warning(
-                            "pykrx PER/PBR 미수집 — 0단계 가격 수집 후 재실행하면 교차 검증이 가능합니다. "
-                            "가격 수집이 안 된다면 아래 KRX 인증 설정을 확인하세요."
+                            "pykrx PER/PBR 미수집 — 0단계 가격 수집 후 재실행하면 교차 검증이 가능합니다."
                         )
-                    if has_warning:
-                        st.warning("15% 이상 차이가 발생한 종목이 있습니다. 데이터를 직접 확인하세요.")
+                    if has_pbr_warning:
+                        st.warning("PBR 15% 이상 차이 발생 — BPS 데이터를 직접 확인하세요.")
                     elif not has_price_missing:
-                        st.success("모든 샘플 종목이 정상 범위 내에 있습니다.")
+                        st.success("PBR 정상 범위 (15% 이내). PER 차이는 TTM/Annual EPS 방법론 차이로 정상입니다.")
+
+                    st.caption(
+                        "PER 차이: pykrx는 KRX TTM EPS(최근 4분기 합산), "
+                        "Naver는 FY 연간 EPS 기준으로 계산하여 분기 편차가 큰 종목은 50%+ 차이가 날 수 있습니다."
+                    )
 
                     def _style_warning(row):
-                        if row["경고"] == "주의":
+                        if row["경고"] == "PBR주의":
                             return ["background-color: #fff3cd"] * len(row)
                         if row["경고"] == "미수집":
                             return ["background-color: #f0f0f0"] * len(row)
