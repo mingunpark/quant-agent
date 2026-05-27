@@ -102,13 +102,12 @@ def validate_against_naver(
     sample_n: int = 5,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> pd.DataFrame:
-    """DART DataFrame의 PER/EPS/PBR을 네이버 금융과 비교.
+    """pykrx로 수집된 PER/PBR을 네이버 금융과 교차 검증.
 
-    dart_df: ticker, per, pbr, eps 컬럼이 있는 factor_input 형식 DataFrame
+    dart_df: ticker, per, pbr 컬럼이 있는 factor_input 형식 DataFrame
     sample_n: 교차 검증할 최대 종목 수 (API 부하 방지)
-    per/pbr이 NaN인 경우(가격 미수집 상태) Naver 실시간값으로 자동 보완.
-      — 이 경우 "수집_PER" 컬럼이 Naver 현재값을 표시하며 차이는 0%로 나타남.
-    Returns: 비교 결과 DataFrame (종목코드, 수집_PER/PBR, Naver_PER/PBR, 차이%, 경고 여부)
+    per/pbr이 NaN인 경우 "미수집" 상태로 표시 — 가격 수집 후 재실행 필요.
+    Returns: 비교 결과 DataFrame (종목코드, pykrx_PER/PBR, Naver_PER/PBR, 차이%, 경고)
     """
     sample = dart_df.dropna(subset=["ticker"]).head(sample_n).reset_index(drop=True)
     tickers = sample["ticker"].tolist()
@@ -129,32 +128,24 @@ def validate_against_naver(
             n_per = naver["per"]
             n_pbr = naver["pbr"]
 
-            # 가격 미수집 상태: factor_input per/pbr=NaN → Naver 현재값 대체
-            fallback = False
-            if math.isnan(d_per) or math.isnan(d_pbr):
-                fallback = True
-                if math.isnan(d_per):
-                    d_per = n_per
-                if math.isnan(d_pbr):
-                    d_pbr = n_pbr
+            price_missing = math.isnan(d_per) and math.isnan(d_pbr)
 
             diff_per = _pct_diff(d_per, n_per)
             diff_pbr = _pct_diff(d_pbr, n_pbr)
-            # 대체값 사용 시 자기 자신과 비교이므로 경고 대상 제외
-            warn = (not fallback) and (
+            warn = (
                 (not math.isnan(diff_per) and diff_per > DIFF_THRESHOLD)
                 or (not math.isnan(diff_pbr) and diff_pbr > DIFF_THRESHOLD)
             )
 
             rows.append({
                 "종목코드": ticker,
-                "수집_PER": _fmt(d_per),
+                "pykrx_PER": "미수집" if math.isnan(d_per) else _fmt(d_per),
                 "Naver_PER": _fmt(n_per),
-                "PER_차이": "가격 미수집" if fallback else _fmt_pct(diff_per),
-                "수집_PBR": _fmt(d_pbr),
+                "PER_차이": "N/A" if math.isnan(d_per) else _fmt_pct(diff_per),
+                "pykrx_PBR": "미수집" if math.isnan(d_pbr) else _fmt(d_pbr),
                 "Naver_PBR": _fmt(n_pbr),
-                "PBR_차이": "가격 미수집" if fallback else _fmt_pct(diff_pbr),
-                "경고": "가격 미수집" if fallback else ("주의" if warn else "정상"),
+                "PBR_차이": "N/A" if math.isnan(d_pbr) else _fmt_pct(diff_pbr),
+                "경고": "미수집" if price_missing else ("주의" if warn else "정상"),
             })
 
     if progress_callback:

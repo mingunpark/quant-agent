@@ -512,12 +512,12 @@ with tab_collect:
 
                 if "naver_validation" in st.session_state:
                     _nv_df: pd.DataFrame = st.session_state["naver_validation"]
-                    has_price_missing = (_nv_df["경고"] == "가격 미수집").any()
+                    has_price_missing = (_nv_df["경고"] == "미수집").any()
                     has_warning = (_nv_df["경고"] == "주의").any()
                     if has_price_missing:
-                        st.info(
-                            "가격 데이터(PER/PBR)가 아직 수집되지 않아 Naver 현재값을 참조합니다. "
-                            "0단계에서 가격 수집을 완료하면 정확한 교차 검증이 가능합니다."
+                        st.warning(
+                            "pykrx PER/PBR 미수집 — 0단계 가격 수집 후 재실행하면 교차 검증이 가능합니다. "
+                            "가격 수집이 안 된다면 아래 KRX 인증 설정을 확인하세요."
                         )
                     if has_warning:
                         st.warning("15% 이상 차이가 발생한 종목이 있습니다. 데이터를 직접 확인하세요.")
@@ -527,7 +527,7 @@ with tab_collect:
                     def _style_warning(row):
                         if row["경고"] == "주의":
                             return ["background-color: #fff3cd"] * len(row)
-                        if row["경고"] == "가격 미수집":
+                        if row["경고"] == "미수집":
                             return ["background-color: #f0f0f0"] * len(row)
                         return [""] * len(row)
 
